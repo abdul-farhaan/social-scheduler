@@ -39,7 +39,7 @@ const getOrCreateZernioProfile = async (user:any) : Promise<string> => {
 
 // Generate OAuth authorization URL
 // GET /api/auth/:platform
-export const generateAuthUrl = async (req: Request, res: Response) : Promise<void>=> {
+export const generateAuthUrl = async (req: AuthRequest, res: Response) : Promise<void>=> {
     try {
         const {platform} = req.params;
         const profileId = await getOrCreateZernioProfile(req.user);
