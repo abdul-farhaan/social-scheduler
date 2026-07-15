@@ -6,35 +6,13 @@ import { AuthRequest } from "../middlewares/authMiddleware.js";
 import axios from "axios";
 import { cloudinary } from "../config/cloudinary.js";
 
-// Helper to poll Leonardo.ai
-const pollLeonardoJob = async (generationId: string, apiKey: string) : Promise<string>=>{
-    const maxRetries = 20;
-    const delay = 5000;
+const generateImageWithPollinations = async (prompt: string): Promise<Buffer> => {
+  const encodedPrompt = encodeURIComponent(prompt);
+  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`;
 
-    for(let i = 0; i < maxRetries; i++){
-        try {
-           const response = await axios.get(`https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`, {headers: {
-            accept: "application/json", authorization: `Bearer ${apiKey}`
-           }}) 
-
-           const generation = response.data.generations_by_pk;
-           if(generation.status === "COMPLETE"){
-            if(generation.generated_images && generation.generated_images.length > 0){
-                return generation.generated_images[0].url;
-            }
-            throw new Error("Generation complete but no images found.")
-           }
-           if(generation.status === "FAILED"){
-            throw new Error("Leonardo.ai generation failed.")
-           }
-        } catch (err: any) {
-            console.error("Polling error:", err?.response?.data || err.message);
-        }
-
-        await new Promise((resolve)=> setTimeout(resolve, delay));
-    }
-    throw new Error("Leonardo.ai generation timed out.")
-}
+  const response = await axios.get(url, { responseType: "arraybuffer" });
+  return Buffer.from(response.data);
+};
 
 // Generate post
 // POST /api/posts/generate
@@ -57,7 +35,7 @@ export const generatePost = async (req: AuthRequest, res: Response): Promise<voi
             Tone: ${tone}. 
             Include relevant hashtags.
             Format the response as JSON with "content" and "imagePrompt" fields. 
-            The "imagePrompt" should be a highly descriptive prompt for an image generator that complements the post.`,
+            The "imagePrompt" should be a detailed, vivid image-generation prompt (30-50 words) describing subject, setting lighting and visual style (eg: "photorealistic" , "flat illustration", "vibrant colors"). Avoid abstract or vague phrasing- describe exactly what should visually appear in the image.`,
         });
 
         let content = "";
@@ -76,42 +54,16 @@ export const generatePost = async (req: AuthRequest, res: Response): Promise<voi
         let mediaUrl = "";
         if(generateImage){
            try {
-            const leonardoKey = process.env.LEONARDO_API_KEY;
-            if(leonardoKey){
-                // Use Leonardo.ai for image generation
-                const leoResponse = await axios.post(
-                    "https://cloud.leonardo.ai/api/rest/v2/generations",
-                    {
-                        "public": false,
-                        "model": "gpt-image-2",
-                        "parameters": {
-                            "quality": "LOW",
-                            "prompt": imagePrompt,
-                            "quantity": 1,
-                            "width": 1024,
-                            "height": 1024,
-                            "prompt_enhance": "OFF"
-                        }
-                    },{
-                        headers:{
-                            accept: "application/json",
-                            authorization: `Bearer ${leonardoKey}`,
-                            "content-type": "application/json",
-                        }
-                    }
-                )
+                const imageBuffer = await generateImageWithPollinations(imagePrompt);
 
-                const generationId = leoResponse.data.generate.generationId;
-                const tempUrl = await pollLeonardoJob(generationId, leonardoKey);
+                const uploadResult = await cloudinary.uploader.upload(
+                    `data:image/png;base64,${imageBuffer.toString("base64")}`,
+                    { folder: "ai-generations" }
+                );
 
-                // Upload to Cloudinary for persistence
-                const uploadResult = await cloudinary.uploader.upload(tempUrl, {
-                    folder: "ai-generations",
-                });
                 mediaUrl = uploadResult.secure_url;
-            }
            } catch (err: any) {
-                console.error("Image generation failed:", err);
+                console.error("Image generation failed:", err?.message || err);
            } 
         }
 
@@ -163,7 +115,6 @@ export const schedulePost = async (req: AuthRequest, res: Response): Promise<voi
     try {
         const { content, platforms, scheduledFor, status } = req.body;
 
-        // Parse platforms if it comes as a stringified array from FormData
         let parsedPlatforms = platforms;
         if(typeof platforms === "string"){
             try {
