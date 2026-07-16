@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { Post } from "../models/Post.js";
-import { Account } from "../models/account.js";
+import { Account } from "../models/Account.js";
 import zernio from "../config/zernio.js";
 import { ActivityLog } from "../models/ActivityLog.js";
 import { platform } from "node:os";
